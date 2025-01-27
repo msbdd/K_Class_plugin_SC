@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<seiscomp>
+	<plugin name="K_Class">
+		<extends>global</extends>
+		<description>
+		The K_Class plugin to calculate magnitude-alike "Klass"/"Class"
+		parameter that is widely used in former USSR countries.
+		</description>
+	</plugin>
+	<binding name="K_Class" module="global">
+		<description>
+		The K_Class plugin to calculate magnitude-alike "Klass"/"Class"
+		parameter that is widely used in former USSR countries. 
+		This code is a modified/inspired version of the MLh plugin (SED).
+		</description>
+		<configuration>
+			<group name="amplitudes">
+				<group name="K_Class">
+					<parameter name="scale" type="double" default="100.0">
+						<description>
+						Define wavelet scaling for the P wave detection
+						</description>
+					</parameter>
+				</group>
+			</group>
+		</configuration>
+	</binding>
+</seiscomp>
