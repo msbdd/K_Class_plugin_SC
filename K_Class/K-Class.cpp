@@ -1,3 +1,5 @@
+#define SEISCOMP_COMPONENT K_Class
+
 #include "K-Class.h"
 #include "mexican_hat.h"
 
@@ -382,6 +384,12 @@ class MagnitudeProcessor_K_Class : public Processing::MagnitudeProcessor
 	amplitudeType () const override
 	{
 		return MAG_TYPE;
+	}
+	void
+	setDefaults() override {
+		_minimumDistanceDeg = DELTA_MIN;
+		_maximumDistanceDeg = DELTA_MAX;
+		_maximumDepthKm = DEPTH_MAX;
 	}
 	bool
 	setup (const Processing::Settings &settings) override
