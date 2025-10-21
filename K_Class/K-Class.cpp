@@ -89,7 +89,7 @@ average (
 	return t;
 }
 
-ADD_SC_PLUGIN ("K_Class magnitude", "Dmitry Sidorov-Biryukov", 0, 0, 1)
+ADD_SC_PLUGIN ("K_Class magnitude", "Dmitry Sidorov-Biryukov", 0, 0, 2)
 
 // We need to create a custom non abstract class for individual magnitude
 // computation
@@ -208,7 +208,23 @@ class AmplitudeProcessor_K_Class : public Processing::AmplitudeProcessor
 			return false;
 		}
 
-		_ampZ.wavelet_scale = settings.getDouble ("amplitudes.K_Class.scale");
+		// Read the wavelet scale from config. Provide a sensible default if the
+		// option is missing to avoid throwing Config::OptionNotFoundException.
+		try {
+			_ampZ.wavelet_scale = settings.getDouble ("amplitudes.K_Class.scale");
+		}
+		catch ( ... ) {
+			try {
+				_ampZ.wavelet_scale = settings.getDouble ("K_Class.scale");
+				SEISCOMP_WARNING("Deprecated config key K_Class.scale used for station %s.%s. Please migrate to amplitudes.K_Class.scale.",
+					settings.networkCode.c_str(), settings.stationCode.c_str());
+			}
+			catch ( ... ) {
+				_ampZ.wavelet_scale = 100.0; // default scale chosen empirically
+				SEISCOMP_WARNING("amplitudes.K_Class.scale not found for station %s.%s. Using default wavelet scale=%f.",
+					settings.networkCode.c_str(), settings.stationCode.c_str(), _ampZ.wavelet_scale);
+			}
+		}
 
 		return true;
 	}
@@ -238,6 +254,69 @@ class AmplitudeProcessor_K_Class : public Processing::AmplitudeProcessor
 		setConfig (_ampE.config ());
 		setTimeWindow (
 			_ampE.timeWindow () | _ampN.timeWindow () | _ampZ.timeWindow ());
+	}
+
+	const AmplitudeProcessor *componentProcessor (Component comp) const override
+	{
+		switch (comp)
+		{
+		case FirstHorizontalComponent:
+			return &_ampN;
+		case SecondHorizontalComponent:
+			return &_ampE;
+		case VerticalComponent:
+			return &_ampZ;
+		default:
+			break;
+		}
+
+		return nullptr;
+	}
+
+	const DoubleArray *processedData (Component comp) const override
+	{
+		switch (comp)
+		{
+		case FirstHorizontalComponent:
+			return _ampN.processedData (comp);
+		case SecondHorizontalComponent:
+			return _ampE.processedData (comp);
+		case VerticalComponent:
+			return _ampZ.processedData (comp);
+		default:
+			break;
+		}
+
+		return nullptr;
+	}
+
+	int capabilities () const override
+	{
+		return _ampN.capabilities () | _ampE.capabilities () | _ampZ.capabilities ();
+	}
+
+	void reprocess (OPT (double) searchBegin, OPT (double) searchEnd) override
+	{
+		setStatus (WaitingForData, 0);
+		_ampN.setConfig (config ());
+		_ampE.setConfig (config ());
+		_ampZ.setConfig (config ());
+
+		_results[0] = _results[1] = _results[2] = Core::None;
+
+		_ampN.reprocess (searchBegin, searchEnd);
+		_ampE.reprocess (searchBegin, searchEnd);
+		_ampZ.reprocess (searchBegin, searchEnd);
+
+		if (!isFinished ())
+		{
+			if (_ampN.status () > Finished)
+				setStatus (_ampN.status (), _ampN.statusValue ());
+			else if (_ampE.status () > Finished)
+				setStatus (_ampE.status (), _ampE.statusValue ());
+			else if (_ampZ.status () > Finished)
+				setStatus (_ampZ.status (), _ampZ.statusValue ());
+		}
 	}
 
 	void
