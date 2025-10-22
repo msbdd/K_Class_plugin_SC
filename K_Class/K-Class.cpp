@@ -473,6 +473,7 @@ class MagnitudeProcessor_K_Class : public Processing::MagnitudeProcessor
 	bool
 	setup (const Processing::Settings &settings) override
 	{
+		Processing::MagnitudeProcessor::setup(settings);
 		return true;
 	}
 
