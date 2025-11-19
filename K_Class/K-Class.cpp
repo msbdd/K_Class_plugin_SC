@@ -1,26 +1,26 @@
 #define SEISCOMP_COMPONENT K_Class
 
 #include "K-Class.h"
-#include "mexican_hat.h"
 
 #include <iostream>
 #include <seiscomp/logging/log.h>
 #include <seiscomp/math/geo.h>
 #include <seiscomp/processing/amplitudes/ML.h>
 #include <seiscomp/processing/magnitudeprocessor.h>
+#include <seiscomp/seismology/ttt.h>
+#include <seiscomp/client/application.h>
 
 #include <boost/bind.hpp>
 
-// Valid within 0-15 degrees
+// Valid within 0-10 degrees
 #define DELTA_MIN 0.
-#define DELTA_MAX 15
-#define DEPTH_MAX 180
+#define DELTA_MAX 10
+#define DEPTH_MAX 80
 
 #define MAG_TYPE "K_Class"
 
 using namespace std;
 using namespace Seiscomp;
-
 // Using a custom void namespace to prevent name collisions and improve code
 // organization
 
@@ -46,9 +46,6 @@ summ (
 
 	v.lowerUncertainty = std::sqrt (l0 * l0 + l1 * l1);
 	v.upperUncertainty = std::sqrt (u0 * u0 + u1 * u1);
-
-	v.lowerUncertainty = l;
-	v.upperUncertainty = u;
 
 	return v;
 }
@@ -89,7 +86,7 @@ average (
 	return t;
 }
 
-ADD_SC_PLUGIN ("K_Class magnitude", "Dmitry Sidorov-Biryukov", 0, 0, 2)
+ADD_SC_PLUGIN ("K_Class magnitude", "Dmitry Sidorov-Biryukov", 0, 0, 3)
 
 // We need to create a custom non abstract class for individual magnitude
 // computation
@@ -98,7 +95,6 @@ class SimpleAmplitudeProcessor
 	: public Processing::AbstractAmplitudeProcessor_ML
 {
   public:
-	double wavelet_scale;
 	SimpleAmplitudeProcessor ()
 		: Processing::AbstractAmplitudeProcessor_ML (MAG_TYPE)
 	{
@@ -110,13 +106,114 @@ class SimpleAmplitudeProcessor
 	friend class AmplitudeProcessor_K_Class;
 
   private:
+	bool _haveP;
+	bool _haveS;
+	Core::Time _sArrival;
+	Core::Time _pArrival;
+
+	void setEnvironment(const DataModel::Origin *hypocenter,
+						const DataModel::SensorLocation *receiver,
+						const DataModel::Pick *pick) {
+
+		// Horizontal → default behaviour
+		if (usedComponent() == FirstHorizontal || usedComponent() == SecondHorizontal) {
+			SEISCOMP_DEBUG("setEnvironment: Horizontal component → using default\n");
+			AmplitudeProcessor::setEnvironment(hypocenter, receiver, pick);
+			return;
+		}
+
+		// Vertical → we want P–S window prediction
+		AmplitudeProcessor::setEnvironment(hypocenter, receiver, pick);
+
+		_haveP = _haveS = false;
+		double hypoLat, hypoLon, hypoDepth;
+		double recvLat, recvLon;
+
+		try {
+			hypoLat   = _environment.hypocenter->latitude().value();
+			hypoLon   = _environment.hypocenter->longitude().value();
+			hypoDepth = _environment.hypocenter->depth().value();
+			recvLat   = _environment.receiver->latitude();
+			recvLon   = _environment.receiver->longitude();
+		}
+		catch (...) {
+			setStatus(Error, 1);
+			return;
+		}
+
+		// Create travel-time table interface
+		// Model and interface are read from global config
+
+		TravelTimeTableInterface *ttiface = nullptr;
+
+		auto app = Seiscomp::Client::Application::Instance();
+		std::string interface = app->configGetString("amplitudes.ttt.interface");
+		std::string model = app->configGetString("amplitudes.ttt.model");
+		ttiface = TravelTimeTableInterface::Create(interface.c_str());
+		ttiface->setModel(model.c_str());
+		// Compute station elevation if present (optional safe)
+		double recvElev = 0.0;
+		try {
+			recvElev = _environment.receiver->elevation();
+		} catch (...) {}
+
+		// Compute travel times
+		TravelTimeList *ttlist =
+			ttiface->compute(hypoLat, hypoLon, hypoDepth,
+							recvLat, recvLon, recvElev, 1);
+
+		if (!ttlist || ttlist->isEmpty()) {
+			delete ttlist;
+			delete ttiface;
+			setStatus(Error, 3);
+			return;
+		}
+
+		// Fetch P and S
+		const TravelTime *tp = getPhase(ttlist, "P");
+		const TravelTime *ts = getPhase(ttlist, "S");
+
+		if (tp) {
+			_pArrival = _environment.hypocenter->time().value()
+						+ Core::TimeSpan(tp->time);
+			_haveP = true;
+		}
+
+		if (ts) {
+			_sArrival = _environment.hypocenter->time().value()
+						+ Core::TimeSpan(ts->time);
+			_haveS = true;
+		}
+
+		delete ttlist;
+		delete ttiface;
+
+		if (!_haveP || !_haveS) {
+			setStatus(Error, 5); // cannot create accurate window
+			return;
+		}
+
+	}
+	void computeTimeWindow() override {
+
+    if (usedComponent() == FirstHorizontal || usedComponent() == SecondHorizontal) {
+        SEISCOMP_DEBUG("computeTimeWindow: Horizontal component → using default\n");
+        return AmplitudeProcessor::computeTimeWindow();
+    }
+
+    // Vertical component (Z): Custom window around P wave - from P to S arrivals - should be the P wave maximum
+    SEISCOMP_DEBUG("computeTimeWindow: Vertical component → custom P-wave window\n");
+	SEISCOMP_DEBUG("P wave arrival %s\n S wave arrival %s\n", _pArrival.toString("%F %T.%f00000"), _sArrival.toString("%F %T.%f00000"));
+    AmplitudeProcessor::setTimeWindow(Core::TimeWindow(_pArrival, _sArrival));
+	}
+
 	bool
 	computeAmplitude (
 		const DoubleArray &data, size_t i1, size_t i2, size_t si1,
 		size_t si2, double offset, AmplitudeIndex *dt,
 		AmplitudeValue *amplitude, double *period, double *snr) override
 	{
-		SEISCOMP_DEBUG ("Custom computeAmplitude called");
+		SEISCOMP_DEBUG ("Custom computeAmplitude called\n");
 		double maxAmplitude = 0.0;
 		size_t amp_index = 0;
 		if (usedComponent () == Vertical)
@@ -126,11 +223,11 @@ class SimpleAmplitudeProcessor
 			{
 				noise = *_noiseAmplitude;
 			}
-			SEISCOMP_DEBUG ("Vertical component noise is %f", noise);
-			amp_index = Wavelet::detectPWavePeak (data, i1, i2, noise, wavelet_scale);
+			SEISCOMP_DEBUG ("Vertical component noise is %f\n", noise);
+			amp_index = find_absmax (data.size (), data.typedData (), si1, si2, offset);
 			SEISCOMP_DEBUG (
-				"i1 = %u\nP wave max detected at %u\nWindow length is %u",
-				i1, amp_index, i2);
+				"si1 = %u\nP wave max detected at %u\nsi2 is %u\n",
+				si1, amp_index, si2);
 			maxAmplitude = fabs (data[amp_index]) - offset;
 		}
 		if (usedComponent () == FirstHorizontal || usedComponent () == SecondHorizontal)
@@ -138,7 +235,7 @@ class SimpleAmplitudeProcessor
 			amp_index = find_absmax (
 				data.size (), data.typedData (), si1, si2, offset);
 			SEISCOMP_DEBUG (
-				"i1 = %u\nS wave max detected at %u\nWindow length is %u",
+				"si1 = %u\nS wave max detected at %u\nsi2 is %u\n",
 				si1, amp_index, si2);
 			maxAmplitude = fabs (data[amp_index] - offset);
 		}
@@ -206,24 +303,6 @@ class AmplitudeProcessor_K_Class : public Processing::AmplitudeProcessor
 		if (!Processing::AmplitudeProcessor::setup (settings))
 		{
 			return false;
-		}
-
-		// Read the wavelet scale from config. Provide a sensible default if the
-		// option is missing to avoid throwing Config::OptionNotFoundException.
-		try {
-			_ampZ.wavelet_scale = settings.getDouble ("amplitudes.K_Class.scale");
-		}
-		catch ( ... ) {
-			try {
-				_ampZ.wavelet_scale = settings.getDouble ("K_Class.scale");
-				SEISCOMP_WARNING("Deprecated config key K_Class.scale used for station %s.%s. Please migrate to amplitudes.K_Class.scale.",
-					settings.networkCode.c_str(), settings.stationCode.c_str());
-			}
-			catch ( ... ) {
-				_ampZ.wavelet_scale = 100.0; // default scale chosen empirically
-				SEISCOMP_WARNING("amplitudes.K_Class.scale not found for station %s.%s. Using default wavelet scale=%f.",
-					settings.networkCode.c_str(), settings.stationCode.c_str(), _ampZ.wavelet_scale);
-			}
 		}
 
 		return true;
@@ -454,6 +533,9 @@ class MagnitudeProcessor_K_Class : public Processing::MagnitudeProcessor
   public:
 	double maxDepth;
 	double dist;
+	double A, a1, a2, a3, a4;
+	double b1, b2, b3, b4;
+	double l1, l2, l3;
 
   public:
 	MagnitudeProcessor_K_Class ()
@@ -474,8 +556,81 @@ class MagnitudeProcessor_K_Class : public Processing::MagnitudeProcessor
 	setup (const Processing::Settings &settings) override
 	{
 		Processing::MagnitudeProcessor::setup(settings);
+		try {
+			l1 = settings.getDouble ("magnitudes.K_Class.l1");
+		}
+		catch ( ... ) {
+			l1 = 75.0;
+		}
+		try {
+			l2 = settings.getDouble ("magnitudes.K_Class.l2");
+		}
+		catch ( ... ) {
+			l2 = 264.0;
+		}
+		try {
+			l3 = settings.getDouble ("magnitudes.K_Class.l3");
+		}
+		catch ( ... ) {
+			l3 = 800.0;
+		}
+		try {
+			A = settings.getDouble ("magnitudes.K_Class.A");
+		}
+		catch ( ... ) {
+			A = 1.84;
+		}
+		try {
+			a1 = settings.getDouble ("magnitudes.K_Class.a1");
+		}
+		catch ( ... ) {
+			a1 = 2.11;
+		}
+		try {
+			a2 = settings.getDouble ("magnitudes.K_Class.a2");
+		}
+		catch ( ... ) {
+			a2 = 1.1;
+		}
+		try {
+			a3 = settings.getDouble ("magnitudes.K_Class.a3");
+		}
+		catch ( ... ) {
+			a3 = 2.98;
+		}
+		try {
+			a4 = settings.getDouble ("magnitudes.K_Class.a4");
+		}
+		catch ( ... ) {
+			a4 = 0.0;
+		}
+		try {
+			b1 = settings.getDouble ("magnitudes.K_Class.b1");
+		}
+		catch ( ... ) {
+			b1 = 1.32;
+		}
+		try {
+			b2 = settings.getDouble ("magnitudes.K_Class.b2");
+		}
+		catch ( ... ) {
+			b2 = 3.21;
+		}
+		try {
+			b3 = settings.getDouble ("magnitudes.K_Class.b3");
+		}
+		catch ( ... ) {
+			b3 = -1.34;
+		}
+		try {
+			b4 = settings.getDouble ("magnitudes.K_Class.b4");
+		}
+		catch ( ... ) {
+			b4 = 8.0;
+		}
 		return true;
 	}
+
 
 	Processing::MagnitudeProcessor::Status
 	computeMagnitude (
@@ -511,9 +666,25 @@ class MagnitudeProcessor_K_Class : public Processing::MagnitudeProcessor
 		}
 		epdistkm = Math::Geo::deg2km (delta);
 		hypdistkm = sqrt (epdistkm * epdistkm + depth * depth);
+		if (hypdistkm <= l1)
+		{
+			magcalc = A * (log10 (amplitude) + a1 * log10 (hypdistkm) + b1);
+		}
+		else if (hypdistkm > l1 && hypdistkm <= l2)
+		{
+			magcalc = A * (log10 (amplitude) + a2 * log10 (hypdistkm) + b2);
+		}
+		else if (hypdistkm > l2 && hypdistkm <= l3)
+		{
+			magcalc = A * (log10 (amplitude) + a3 * log10 (hypdistkm) + b3);
+		}
+		else
+		{
+			magcalc = A * (log10 (amplitude) + a4 * log10 (hypdistkm) + b4);
 
-		magcalc = 2.94 + 1.935 * (log10 (amplitude) + 1.734 * log10 (hypdistkm));
-		*mag = magcalc;
+		}
+		
+			*mag = magcalc;
 
 		return OK;
 	}

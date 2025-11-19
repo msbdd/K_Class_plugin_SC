@@ -1,30 +1,21 @@
 Amplitude
 ---------
 
-K_Class amplitude calculation is using a wavelet (Mexican hat) transform for the peak P wave amplitude
-search and maximum value of an S wave at any horizontal component.
-Since the wavelet is used only for P wave detection at the vertical component its scale could be configurable via the plugin configuration. 
+K_Class amplitude calculation is using a custom time window (between the P and S waves arrivals) for the maximum P wave amplitude
+search on the vertical component and maximum value of an S wave at any horizontal component.
 
 Station Magnitude
 -----------------
 
 The K_class plugin calculates the individual station magnitude by the formula obtained from (G.K. Aslanov et al., 2015):
 
-.. math::
-
-   K_Class = 2.94 + 1.935(\log10(a) + 1.734 \log10(hypdistkm))
-
-Where a is calculated as
-
-.. math::
-
-   a = (Ap + As) / V
+TBD
 
 Where Ap and As are ampitudes of P and S wave respectivly and V is the gain of the instrument.
 Hypdistkm is the distance from the sensor to the hypocenter in kilometers.
 
-* Distance range: 0 - 15 deg
-* Depth range: 0 - 180 km
+* Distance range: 0 - 10 deg
+* Depth range: 0 - 80 km
 
 Configuration
 -------------
