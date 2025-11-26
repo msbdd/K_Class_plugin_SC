@@ -1,8 +1,15 @@
 #define SEISCOMP_COMPONENT K_Class
+// Valid within 0-10 degrees from 0 to 80 km;
+#define DELTA_MIN 0.
+#define DELTA_MAX 10
+#define DEPTH_MAX 80
+#define MAG_TYPE "K_Class"
 
 #include "K-Class.h"
 
 #include <iostream>
+#include <boost/bind/bind.hpp>
+
 #include <seiscomp/logging/log.h>
 #include <seiscomp/math/geo.h>
 #include <seiscomp/processing/amplitudes/ML.h>
@@ -10,25 +17,15 @@
 #include <seiscomp/seismology/ttt.h>
 #include <seiscomp/client/application.h>
 
-#include <boost/bind.hpp>
-
-// Valid within 0-10 degrees
-#define DELTA_MIN 0.
-#define DELTA_MAX 10
-#define DEPTH_MAX 80
-
-#define MAG_TYPE "K_Class"
-
 using namespace std;
 using namespace Seiscomp;
+
 // Using a custom void namespace to prevent name collisions and improve code
 // organization
-
 namespace
 {
 
 // Custom function to summ two amplitudes
-
 Processing::AmplitudeProcessor::AmplitudeValue
 summ (
 	const Processing::AmplitudeProcessor::AmplitudeValue &v0,
@@ -41,8 +38,6 @@ summ (
 	double u0 = v0.upperUncertainty ? *v0.upperUncertainty : 0.0;
 	double l1 = v1.lowerUncertainty ? *v1.lowerUncertainty : 0.0;
 	double u1 = v1.upperUncertainty ? *v1.upperUncertainty : 0.0;
-
-	double l = 0, u = 0;
 
 	v.lowerUncertainty = std::sqrt (l0 * l0 + l1 * l1);
 	v.upperUncertainty = std::sqrt (u0 * u0 + u1 * u1);
@@ -98,10 +93,11 @@ class SimpleAmplitudeProcessor
 	SimpleAmplitudeProcessor ()
 		: Processing::AbstractAmplitudeProcessor_ML (MAG_TYPE)
 	{
-		setMinSNR (0);
-		setMinDist (DELTA_MIN);
-		setMaxDist (DELTA_MAX);
-		setMaxDepth (DEPTH_MAX);
+
+	}
+	void setTravelTimeTable(TravelTimeTableInterfacePtr ttt)
+	{
+        _ttt = ttt;
 	}
 	friend class AmplitudeProcessor_K_Class;
 
@@ -110,171 +106,168 @@ class SimpleAmplitudeProcessor
 	bool _haveS;
 	Core::Time _sArrival;
 	Core::Time _pArrival;
+	TravelTimeTableInterfacePtr _ttt;
 
 	void setEnvironment(const DataModel::Origin *hypocenter,
 						const DataModel::SensorLocation *receiver,
-						const DataModel::Pick *pick) {
-
-		// Horizontal → default behaviour
-		if (usedComponent() == FirstHorizontal || usedComponent() == SecondHorizontal) {
-			SEISCOMP_DEBUG("setEnvironment: Horizontal component → using default\n");
+						const DataModel::Pick *pick) 
+		{
 			AmplitudeProcessor::setEnvironment(hypocenter, receiver, pick);
-			return;
-		}
-
-		// Vertical → we want P–S window prediction
-		AmplitudeProcessor::setEnvironment(hypocenter, receiver, pick);
-
-		_haveP = _haveS = false;
-		double hypoLat, hypoLon, hypoDepth;
-		double recvLat, recvLon;
-
-		try {
-			hypoLat   = _environment.hypocenter->latitude().value();
-			hypoLon   = _environment.hypocenter->longitude().value();
-			hypoDepth = _environment.hypocenter->depth().value();
-			recvLat   = _environment.receiver->latitude();
-			recvLon   = _environment.receiver->longitude();
-		}
-		catch (...) {
-			setStatus(Error, 1);
-			return;
-		}
-
-		// Create travel-time table interface
-		// Model and interface are read from global config
-
-		TravelTimeTableInterface *ttiface = nullptr;
-
-		auto app = Seiscomp::Client::Application::Instance();
-		std::string interface = app->configGetString("amplitudes.ttt.interface");
-		std::string model = app->configGetString("amplitudes.ttt.model");
-		ttiface = TravelTimeTableInterface::Create(interface.c_str());
-		ttiface->setModel(model.c_str());
-		// Compute station elevation if present (optional safe)
-		double recvElev = 0.0;
-		try {
-			recvElev = _environment.receiver->elevation();
-		} catch (...) {}
-
-		// Compute travel times
-		TravelTimeList *ttlist =
-			ttiface->compute(hypoLat, hypoLon, hypoDepth,
-							recvLat, recvLon, recvElev, 1);
-
-		if (!ttlist || ttlist->isEmpty()) {
-			delete ttlist;
-			delete ttiface;
-			setStatus(Error, 3);
-			return;
-		}
-
-		// Fetch P and S
-		const TravelTime *tp = getPhase(ttlist, "P");
-		const TravelTime *ts = getPhase(ttlist, "S");
-
-		if (tp) {
-			_pArrival = _environment.hypocenter->time().value()
-						+ Core::TimeSpan(tp->time);
-			_haveP = true;
-		}
-
-		if (ts) {
-			_sArrival = _environment.hypocenter->time().value()
-						+ Core::TimeSpan(ts->time);
-			_haveS = true;
-		}
-
-		delete ttlist;
-		delete ttiface;
-
-		if (!_haveP || !_haveS) {
-			setStatus(Error, 5); // cannot create accurate window
-			return;
-		}
-
-	}
-	void computeTimeWindow() override {
-
-    if (usedComponent() == FirstHorizontal || usedComponent() == SecondHorizontal) {
-        SEISCOMP_DEBUG("computeTimeWindow: Horizontal component → using default\n");
-        return AmplitudeProcessor::computeTimeWindow();
-    }
-
-    // Vertical component (Z): Custom window around P wave - from P to S arrivals - should be the P wave maximum
-    SEISCOMP_DEBUG("computeTimeWindow: Vertical component → custom P-wave window\n");
-	SEISCOMP_DEBUG("P wave arrival %s\n S wave arrival %s\n", _pArrival.toString("%F %T.%f00000"), _sArrival.toString("%F %T.%f00000"));
-    AmplitudeProcessor::setTimeWindow(Core::TimeWindow(_pArrival, _sArrival));
-	}
-
-	bool
-	computeAmplitude (
-		const DoubleArray &data, size_t i1, size_t i2, size_t si1,
-		size_t si2, double offset, AmplitudeIndex *dt,
-		AmplitudeValue *amplitude, double *period, double *snr) override
-	{
-		SEISCOMP_DEBUG ("Custom computeAmplitude called\n");
-		double maxAmplitude = 0.0;
-		size_t amp_index = 0;
-		if (usedComponent () == Vertical)
-		{
-			double noise = 1.0;
-			if (_noiseAmplitude)
-			{
-				noise = *_noiseAmplitude;
+			double dist, az, baz;
+			double hypoLat, hypoLon, hypoDepth;
+			double recvLat, recvLon;
+			try {
+				hypoLat   = _environment.hypocenter->latitude().value();
+				hypoLon   = _environment.hypocenter->longitude().value();
+				hypoDepth = _environment.hypocenter->depth().value();
+				recvLat   = _environment.receiver->latitude();
+				recvLon   = _environment.receiver->longitude();
 			}
-			SEISCOMP_DEBUG ("Vertical component noise is %f\n", noise);
-			amp_index = find_absmax (data.size (), data.typedData (), si1, si2, offset);
-			SEISCOMP_DEBUG (
-				"si1 = %u\nP wave max detected at %u\nsi2 is %u\n",
-				si1, amp_index, si2);
-			maxAmplitude = fabs (data[amp_index]) - offset;
-		}
-		if (usedComponent () == FirstHorizontal || usedComponent () == SecondHorizontal)
-		{
-			amp_index = find_absmax (
-				data.size (), data.typedData (), si1, si2, offset);
-			SEISCOMP_DEBUG (
-				"si1 = %u\nS wave max detected at %u\nsi2 is %u\n",
-				si1, amp_index, si2);
-			maxAmplitude = fabs (data[amp_index] - offset);
+			catch (...) {
+				setStatus(Error, 1);
+				return;
+			}
+			Math::Geo::delazi_wgs84(hypoLat, hypoLon, recvLat, recvLon,
+								&dist, &az, &baz);
+
+			if ( dist < _config.minimumDistance || dist > _config.maximumDistance ) {
+			setStatus(DistanceOutOfRange, dist);
+			return;
+			}
+
+			// Horizontal → default behaviour
+			if (usedComponent() == FirstHorizontal || usedComponent() == SecondHorizontal) {
+				SEISCOMP_DEBUG("setEnvironment: Horizontal component → using default");
+				return;
+			}
+			_haveP = _haveS = false;
+			// Compute station elevation if present (optional safe)
+			double recvElev = 0.0;
+			try {
+				recvElev = _environment.receiver->elevation();
+			} catch (...) {}
+
+			// Compute travel times
+			TravelTimeList *ttlist =
+				_ttt->compute(hypoLat, hypoLon, hypoDepth,
+								recvLat, recvLon, recvElev, 1);
+
+			if (!ttlist || ttlist->isEmpty()) {
+				delete ttlist;
+				setStatus(Error, 3);
+				return;
+			}
+
+			// Fetch P and S
+			const TravelTime *tp = getPhase(ttlist, "P");
+			const TravelTime *ts = getPhase(ttlist, "S");
+			if (tp) {
+				_pArrival = _environment.hypocenter->time().value()
+							+ Core::TimeSpan(tp->time);
+				_haveP = true;
+			}
+
+			if (ts) {
+				_sArrival = _environment.hypocenter->time().value()
+							+ Core::TimeSpan(ts->time);
+				_haveS = true;
+			}
+
+			delete ttlist;
+
+			if (!_haveP || !_haveS) {
+				setStatus(Error, 5); // cannot create accurate window
+				return;
+			}
+
 		}
 
-		if (maxAmplitude <= 0)
-		{
-			SEISCOMP_DEBUG (
-				"Amplitude computation failed: No valid peak found");
-			return false;
+	void computeTimeWindow() override 
+	{
+		if (usedComponent() == FirstHorizontal || usedComponent() == SecondHorizontal) {
+			SEISCOMP_DEBUG("computeTimeWindow: Horizontal component → using default");
+			return AmplitudeProcessor::computeTimeWindow();
 		}
-		amplitude->value = maxAmplitude;
-		if (_streamConfig[_usedComponent].gain != 0.0)
-		{
-			amplitude->value /= _streamConfig[_usedComponent].gain;
-			amplitude->value *= 1E03;
-			amplitude->value = std::abs (amplitude->value);
-			dt->index = amp_index;
-			*period = -1;
-			*snr = -1;
 
-			SEISCOMP_DEBUG (
-				"Amplitude computed: value=%f, period=%f, snr=%f",
-				amplitude->value, *period, *snr);
+		// Vertical component (Z): Custom window around P wave - from P to S arrivals - should be the P wave maximum
+		SEISCOMP_DEBUG("computeTimeWindow: Vertical component → custom P-wave window");
+		SEISCOMP_DEBUG("P wave arrival %s", _pArrival.toString("%F %T.%f00000"));
+		SEISCOMP_DEBUG("S wave arrival %s", _sArrival.toString("%F %T.%f00000"));
+		AmplitudeProcessor::setTimeWindow(Core::TimeWindow(_pArrival, _sArrival));
+		}
 
-			return true;
-		}
-		else
+		bool
+		computeAmplitude (
+			const DoubleArray &data, size_t i1, size_t i2, size_t si1,
+			size_t si2, double offset, AmplitudeIndex *dt,
+			AmplitudeValue *amplitude, double *period, double *snr) override
 		{
-			return false;
-		}
+			SEISCOMP_DEBUG ("Custom computeAmplitude called");
+			double maxAmplitude = 0.0;
+			size_t amp_index = 0;
+			if (usedComponent () == Vertical)
+			{
+				double noise = 1.0;
+				if (_noiseAmplitude)
+				{
+					noise = *_noiseAmplitude;
+				}
+				SEISCOMP_DEBUG ("Vertical component noise is %f", noise);
+				amp_index = find_absmax (data.size (), data.typedData (), 0, data.size (), offset);
+				SEISCOMP_DEBUG ("Data size = %u",data.size ()); 
+				SEISCOMP_DEBUG ("P wave max detected at %u",amp_index);
+				maxAmplitude = fabs (data[amp_index]) - offset;
+			}
+			if (usedComponent () == FirstHorizontal || usedComponent () == SecondHorizontal)
+			{
+				amp_index = find_absmax (
+					data.size (), data.typedData (), si1, si2, offset);
+				SEISCOMP_DEBUG ("si1 = %u", si1);
+				SEISCOMP_DEBUG ("S wave max detected at %u", amp_index);
+				SEISCOMP_DEBUG ("si2 is %u", si2);
+				maxAmplitude = fabs (data[amp_index] - offset);
+			}
+
+			if (maxAmplitude <= 0)
+			{
+				SEISCOMP_DEBUG (
+					"Amplitude computation failed: No valid peak found");
+				return false;
+			}
+			amplitude->value = maxAmplitude;
+			if (_streamConfig[_usedComponent].gain != 0.0)
+			{
+				amplitude->value /= _streamConfig[_usedComponent].gain;
+				amplitude->value *= 1E03;
+				amplitude->value = std::abs (amplitude->value);
+				dt->index = amp_index;
+				*period = -1;
+				*snr = -1;
+
+				SEISCOMP_DEBUG (
+					"Amplitude computed: value=%f, period=%f, snr=%f",
+					amplitude->value, *period, *snr);
+
+				return true;
+			}
+			else
+			{
+				return false;
+			}
 	}
 };
 
 class AmplitudeProcessor_K_Class : public Processing::AmplitudeProcessor
 {
   public:
+  	TravelTimeTableInterface *_ttt;
 	AmplitudeProcessor_K_Class ()
 		: Processing::AmplitudeProcessor (MAG_TYPE)
-	{
+	{	
+		setMinSNR (0);
+		setMinDist (DELTA_MIN);
+		setMaxDist (DELTA_MAX);
+		setMaxDepth (DEPTH_MAX);
 		setUsedComponent (Any);
 
 		_ampN.setUsedComponent (FirstHorizontal);
@@ -282,11 +275,11 @@ class AmplitudeProcessor_K_Class : public Processing::AmplitudeProcessor
 		_ampZ.setUsedComponent (Vertical);
 
 		_ampN.setPublishFunction (boost::bind (
-			&AmplitudeProcessor_K_Class::newAmplitude, this, _1, _2));
+			&AmplitudeProcessor_K_Class::newAmplitude, this, boost::placeholders::_1, boost::placeholders::_2));
 		_ampE.setPublishFunction (boost::bind (
-			&AmplitudeProcessor_K_Class::newAmplitude, this, _1, _2));
+			&AmplitudeProcessor_K_Class::newAmplitude, this, boost::placeholders::_1, boost::placeholders::_2));
 		_ampZ.setPublishFunction (boost::bind (
-			&AmplitudeProcessor_K_Class::newAmplitude, this, _1, _2));
+			&AmplitudeProcessor_K_Class::newAmplitude, this, boost::placeholders::_1, boost::placeholders::_2));
 	}
 
 	bool
@@ -304,7 +297,15 @@ class AmplitudeProcessor_K_Class : public Processing::AmplitudeProcessor
 		{
 			return false;
 		}
+		// Create travel-time table interface
+		// Model and interface are read from global config
 
+		auto app = Seiscomp::Client::Application::Instance();
+		std::string interface = app->configGetString("amplitudes.ttt.interface");
+		std::string model = app->configGetString("amplitudes.ttt.model");
+		_ttt = TravelTimeTableInterface::Create(interface.c_str());
+		_ttt->setModel(model.c_str());
+		_ampZ.setTravelTimeTable(_ttt);
 		return true;
 	}
 
@@ -317,6 +318,16 @@ class AmplitudeProcessor_K_Class : public Processing::AmplitudeProcessor
 		_ampE.setEnvironment (hypocenter, receiver, pick);
 		_ampN.setEnvironment (hypocenter, receiver, pick);
 		_ampZ.setEnvironment (hypocenter, receiver, pick);
+		if (_ampZ.status() == DistanceOutOfRange) 
+		{
+            setStatus(DistanceOutOfRange, _ampZ.statusValue());
+            return;
+        }
+		if (_ampZ.status() == DepthOutOfRange) 
+		{
+            setStatus(DepthOutOfRange, _ampZ.statusValue());
+            return;
+        }
 	}
 
 	void
@@ -531,7 +542,6 @@ class MagnitudeProcessor_K_Class : public Processing::MagnitudeProcessor
 {
 
   public:
-	double maxDepth;
 	double dist;
 	double A, a1, a2, a3, a4;
 	double b1, b2, b3, b4;
@@ -539,7 +549,7 @@ class MagnitudeProcessor_K_Class : public Processing::MagnitudeProcessor
 
   public:
 	MagnitudeProcessor_K_Class ()
-		: Processing::MagnitudeProcessor (MAG_TYPE), maxDepth (DEPTH_MAX) {}
+		: Processing::MagnitudeProcessor (MAG_TYPE){}
 
 	string
 	amplitudeType () const override
@@ -638,13 +648,14 @@ class MagnitudeProcessor_K_Class : public Processing::MagnitudeProcessor
 		double snr, double delta, double depth, const DataModel::Origin *,
 		const DataModel::SensorLocation *, const DataModel::Amplitude *,
 		const Locale *, double &value) override
-	{
-		if (delta < DELTA_MIN || delta > DELTA_MAX)
+	{	
+		SEISCOMP_DEBUG("Delta = %f", delta);
+		if ((delta < DELTA_MIN)|| (delta > DELTA_MAX))
 		{
 			return DistanceOutOfRange;
 		}
 
-		if (depth > maxDepth)
+		if (depth > DEPTH_MAX)
 		{
 			return DepthOutOfRange;
 		}
@@ -664,6 +675,7 @@ class MagnitudeProcessor_K_Class : public Processing::MagnitudeProcessor
 			*mag = 0;
 			return Error;
 		}
+
 		epdistkm = Math::Geo::deg2km (delta);
 		hypdistkm = sqrt (epdistkm * epdistkm + depth * depth);
 		if (hypdistkm <= l1)
@@ -683,7 +695,7 @@ class MagnitudeProcessor_K_Class : public Processing::MagnitudeProcessor
 			magcalc = A * (log10 (amplitude) + a4 * log10 (hypdistkm) + b4);
 
 		}
-		
+
 			*mag = magcalc;
 
 		return OK;

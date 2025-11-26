@@ -14,6 +14,14 @@ No warranty of any kind is provided, express or implied. The user assumes all re
 
 ## Acknowledgments
 
+Many thanks to everyone who helped along this journey! I wanted to specifically mention:
+
+* **Ruslan Diagilev** for helping with the scientific part: providing a robust information about K_Class nature;
+* **Dirk Rößler** for spotting unnesessary complications during the SeisComP user group meeting and productive talks;
+* **ADD MORE**
+
+**Multiple people from open source community**
+
 The development of this plugin was heavily inspired by and adapted from the `MagnitudeProcessor_ML` (MLh) plugin, originally developed by the **Swiss Seismological Service (ETHZ/SED)**.
 
 Significant portions of the class structure, configuration file handling, and processing logic are based on their work. The original authors are gratefully acknowledged for providing a robust and clear foundation that made this implementation possible.
@@ -22,7 +30,7 @@ Significant portions of the class structure, configuration file handling, and pr
 
 ## Developer Note: API Compatibility
 
-This plugin has a known incompatibility between SeisComP API versions.
+This plugin has a known incompatibility between SeisComP API versions (as i am not using currently the same SeisComP build tags)
 
 * **SeisComP 6.X:** The `setDefaults()` virtual function **does not exist** in the `Processing::MagnitudeProcessor` base class. To compile this plugin for SeisComP 6, you **must delete or comment out** the entire `setDefaults()` function in the `MagnitudeProcessor_K_Class` class.
 
@@ -34,37 +42,58 @@ The plugin will fail to compile on SeisComP 6 if the `setDefaults()` function is
 
 ## Amplitude
 
-K_Class amplitude calculation uses a wavelet (Mexican hat) transform for the peak P wave amplitude search and the maximum value of an S wave at any horizontal component.
-Since the wavelet is used only for P wave detection at the vertical component, its scale can be configured via the plugin configuration.
+The **K_Class** amplitude calculation uses a custom time window strategy:
+* **Vertical Component:** Performs a search for the maximum P-wave amplitude within a dynamic window defined strictly between the **P-wave arrival** and the **S-wave arrival**.
+* **Horizontal Components:** Falls back to the standard `MLh` amplitude search (maximum S-wave amplitude).
 
----
+## Magnitude
 
-## Station Magnitude
+The magnitude is calculated using the maximum value of the P-wave on the vertical component and the S-wave on any horizontal component.
 
-The K_class plugin calculates the individual station magnitude by the formula obtained from (G.K. Aslanov et al., 2015):
-
-$$
-K_{\text{Class}} = 2.94 + 1.935(\log_{10}(a) + 1.734 \log_{10}(\text{hypdistkm}))
-$$
-
-Where $a$ is calculated as:
+The calculation follows the formula used in the WSG software (A.P. Akimov et al., 2020):
 
 $$
-a = (A_p + A_s) / V
+K_{Class} = A \cdot \left( \log_{10}(Amp) + B(R) \right)
 $$
 
-* $A_p$ and $A_s$ are the amplitudes of the P and S waves, respectively.
-* $V$ is the gain of the instrument.
-* `hypdistkm` is the distance from the sensor to the hypocenter in kilometers.
+**Where:**
 
-### Operational Ranges
+* $A$ is the main slope (default: 1.84).
+* $Amp$ is the amplitude sum of P and S waves.
+* $B(R)$ is a piecewise distance-correction term calculated as:
 
-* **Distance range:** 0 - 15 deg
-* **Depth range:** 0 - 180 km
+$$
+B(R) =
+\begin{cases}
+a_1 \cdot \log_{10}(R) + b_1, & R \le l_1 \\
+a_2 \cdot \log_{10}(R) + b_2, & l_1 < R \le l_2 \\
+a_3 \cdot \log_{10}(R) + b_3, & l_2 < R \le l_3 \\
+a_4 \cdot \log_{10}(R) + b_4, & R > l_3
+\end{cases}
+$$
 
----
+* Where $l_x$ is the hypocentral distance in km.
+
+## Defaults
+
+Refer to the SeisComP `.xml` description file or use these default values:
+
+| Coefficient | Default Value | Description |
+| :--- | :--- | :--- |
+| `l1` | 75.0 (km) | First corner epicentral distance |
+| `l2` | 264.0 (km) | Second corner epicentral distance |
+| `l3` | 800.0 (km) | Third corner epicentral distance |
+| `A` | 1.84 | Main slope |
+| `a1` | 2.11 | Slope for segment $R \le l_1$ |
+| `a2` | 1.1 | Slope for segment $l_1 < R \le l_2$ |
+| `a3` | 2.98 | Slope for segment $l_2 < R \le l_3$ |
+| `a4` | 0.0 | Slope for segment $R > l_3$ |
+| `b1` | 1.32 | Intercept for segment $R \le l_1$ |
+| `b2` | 3.21 | Intercept for segment $l_1 < R \le l_2$ |
+| `b3` | -1.34 | Intercept for segment $l_2 < R \le l_3$ |
+| `b4` | 8.0 | Intercept for segment $R > l_3$ |
 
 ## Configuration
 
-1.  Add the `K_Class` plugin to the existing plugins in the global configuration or your station profile.
-2.  Set configurable parameters in the global bindings to compute K_class.
+1.  Add the `K_Class` plugin to the existing plugins in your global configuration (e.g., `global.cfg`).
+2.  Set the configurable coefficients depending on your specific region, or start with the default set to compute K_Class.

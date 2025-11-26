@@ -3,12 +3,10 @@ SET(PLUGIN_TARGET K_Class)
 SET(
 	PLUGIN_SOURCES
 		K-Class.cpp
-		mexican_hat.cpp
 )
 SET(
 	PLUGIN_HEADERS
 		K-Class.h
-		mexican_hat.h
 )
 
 
