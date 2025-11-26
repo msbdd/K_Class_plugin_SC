@@ -38,6 +38,11 @@ This plugin has a known incompatibility between SeisComP API versions (as i am n
 
 The plugin will fail to compile on SeisComP 6 if the `setDefaults()` function is present.
 
+## Applicability
+
+* **Depth:** 0 - 80 km
+* **Distance:** 0 - 1000 km
+
 ---
 
 ## Amplitude
