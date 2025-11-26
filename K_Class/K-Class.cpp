@@ -235,9 +235,9 @@ class SimpleAmplitudeProcessor
 				return false;
 			}
 			amplitude->value = maxAmplitude;
-			if (_streamConfig[_usedComponent].gain != 0.0)
+			if (_streamConfig[targetComponent()].gain != 0.0)
 			{
-				amplitude->value /= _streamConfig[_usedComponent].gain;
+				amplitude->value /= _streamConfig[targetComponent()].gain;
 				amplitude->value *= 1E03;
 				amplitude->value = std::abs (amplitude->value);
 				dt->index = amp_index;

@@ -33,8 +33,10 @@ Significant portions of the class structure, configuration file handling, and pr
 This plugin has a known incompatibility between SeisComP API versions (as i am not using currently the same SeisComP build tags)
 
 * **SeisComP 6.X:** The `setDefaults()` virtual function **does not exist** in the `Processing::MagnitudeProcessor` base class. To compile this plugin for SeisComP 6, you **must delete or comment out** the entire `setDefaults()` function in the `MagnitudeProcessor_K_Class` class.
+targetComponent() should be replaced to _usedComponent.
 
 * **SeisComP 7.X:** The `setDefaults()` function is part of the API and should be included.
+_usedComponent should be replaced to targetComponent().
 
 The plugin will fail to compile on SeisComP 6 if the `setDefaults()` function is present.
 
