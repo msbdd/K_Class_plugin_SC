@@ -298,11 +298,19 @@ class AmplitudeProcessor_K_Class : public Processing::AmplitudeProcessor
 			return false;
 		}
 		// Create travel-time table interface
-		// Model and interface are read from global config
-
-		auto app = Seiscomp::Client::Application::Instance();
-		std::string interface = app->configGetString("amplitudes.ttt.interface");
-		std::string model = app->configGetString("amplitudes.ttt.model");
+		// Model and interface are read from config (no need to manually read them
+		// It is already done in the amplitudeprocessor.cpp)
+		std::string interface = "LOCSAT";
+		std::string model = "iasp91";
+		try {
+			interface = _config.ttInterface;
+			model = _config.ttModel;
+			SEISCOMP_DEBUG("Using %s interface", interface);
+			SEISCOMP_DEBUG("Using %s model", model);
+		}
+		catch (...) {
+		SEISCOMP_DEBUG("No ttt configured, using defaults");
+		}
 		_ttt = TravelTimeTableInterface::Create(interface.c_str());
 		_ttt->setModel(model.c_str());
 		_ampZ.setTravelTimeTable(_ttt);
