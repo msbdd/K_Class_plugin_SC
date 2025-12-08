@@ -311,6 +311,15 @@ class AmplitudeProcessor_K_Class : public Processing::AmplitudeProcessor
 		catch (...) {
 		SEISCOMP_DEBUG("No ttt configured, using defaults");
 		}
+		//SeisComP 7.X fix
+		if (interface == ""){
+			interface = "LOCSAT";
+			SEISCOMP_DEBUG("No interface configured, using defaults");
+		}
+		if (model == ""){
+			model = "iasp91";
+			SEISCOMP_DEBUG("No model configured, using defaults");
+		}
 		_ttt = TravelTimeTableInterface::Create(interface.c_str());
 		_ttt->setModel(model.c_str());
 		_ampZ.setTravelTimeTable(_ttt);
