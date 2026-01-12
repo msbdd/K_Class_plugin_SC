@@ -238,6 +238,7 @@ class SimpleAmplitudeProcessor
 			if (_streamConfig[targetComponent()].gain != 0.0)
 			{
 				amplitude->value /= _streamConfig[targetComponent()].gain;
+				// mm to μm conversion
 				amplitude->value *= 1E03;
 				amplitude->value = std::abs (amplitude->value);
 				dt->index = amp_index;
@@ -582,6 +583,8 @@ class MagnitudeProcessor_K_Class : public Processing::MagnitudeProcessor
 	bool
 	setup (const Processing::Settings &settings) override
 	{
+		// TODO: ?Sanity check of the settings?
+		// TODO: ?Fully customizable distances using the array?
 		Processing::MagnitudeProcessor::setup(settings);
 		try {
 			l1 = settings.getDouble ("magnitudes.K_Class.l1");
@@ -685,7 +688,7 @@ class MagnitudeProcessor_K_Class : public Processing::MagnitudeProcessor
 	compute_K_Class (
 		double amplitude, double delta, double depth, double *mag)
 	{
-		float epdistkm, hypdistkm, magcalc;
+		float epDistKm, hypDistKm, magCalc;
 
 		if (amplitude <= 0.)
 		{
@@ -693,27 +696,27 @@ class MagnitudeProcessor_K_Class : public Processing::MagnitudeProcessor
 			return Error;
 		}
 
-		epdistkm = Math::Geo::deg2km (delta);
-		hypdistkm = sqrt (epdistkm * epdistkm + depth * depth);
-		if (hypdistkm <= l1)
+		epDistKm = Math::Geo::deg2km (delta);
+		hypDistKm = sqrt (epDistKm * epDistKm + depth * depth);
+		if (hypDistKm <= l1)
 		{
-			magcalc = A * (log10 (amplitude) + a1 * log10 (hypdistkm) + b1);
+			magCalc = A * (log10 (amplitude) + a1 * log10 (hypDistKm) + b1);
 		}
-		else if (hypdistkm > l1 && hypdistkm <= l2)
+		else if (hypDistKm > l1 && hypDistKm <= l2)
 		{
-			magcalc = A * (log10 (amplitude) + a2 * log10 (hypdistkm) + b2);
+			magCalc = A * (log10 (amplitude) + a2 * log10 (hypDistKm) + b2);
 		}
-		else if (hypdistkm > l2 && hypdistkm <= l3)
+		else if (hypDistKm > l2 && hypDistKm <= l3)
 		{
-			magcalc = A * (log10 (amplitude) + a3 * log10 (hypdistkm) + b3);
+			magCalc = A * (log10 (amplitude) + a3 * log10 (hypDistKm) + b3);
 		}
 		else
 		{
-			magcalc = A * (log10 (amplitude) + a4 * log10 (hypdistkm) + b4);
+			magCalc = A * (log10 (amplitude) + a4 * log10 (hypDistKm) + b4);
 
 		}
 
-			*mag = magcalc;
+			*mag = magCalc;
 
 		return OK;
 	}

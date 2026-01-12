@@ -38,6 +38,12 @@ Where:
 
 where :math:`l_x` is hypocentral distance in km.
 
+There is a python helper script provided for plotting the B(R)
+
+.. figure:: B_R_plot.png
+   :align: center
+   :alt: B_R_plot image
+
 Defaults
 -------------
 

@@ -18,6 +18,7 @@ Many thanks to everyone who helped along this journey! I wanted to specifically 
 
 * **Ruslan Diagilev** for helping with the scientific part: providing a robust information about K_Class nature;
 * **Dirk Rößler** for spotting unnesessary complications during the SeisComP user group meeting and productive talks;
+* **Peter Evans** for code reviewing and inspiration to continue and push forward;
 * **ADD MORE**
 
 **Multiple people from open source community**
@@ -80,6 +81,9 @@ a_4 \cdot \log_{10}(R) + b_4, & R > l_3
 $$
 
 * Where $l_x$ is the hypocentral distance in km.
+
+There is a python helper script provided for plotting the B(R) and the default values looks like:
+![B_R_plot](K_Class/descriptions/B_R_plot.png)
 
 ## Defaults
 
