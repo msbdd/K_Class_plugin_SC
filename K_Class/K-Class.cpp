@@ -159,8 +159,35 @@ class SimpleAmplitudeProcessor
 			}
 
 			// Fetch P and S
-			const TravelTime *tp = getPhase(ttlist, "P");
-			const TravelTime *ts = getPhase(ttlist, "S");
+			// Added fix to find "Any" P and S
+			// As P and S are unavailable for events ~<250km
+			const char* pCandidates[] = {"Pg", "Pn", "P"};
+			const char* sCandidates[] = {"Sg", "Sn", "S"};
+
+			const TravelTime *tp = nullptr;
+			const TravelTime *ts = nullptr;
+
+			// Find the earliest P-type phase
+			for (const char* phaseName : pCandidates) {
+				const TravelTime *t = getPhase(ttlist, phaseName);
+				if (t) {
+					// If we haven't found a P yet, or if this one is earlier, keep it
+					if (!tp || t->time < tp->time) {
+						tp = t;
+					}
+				}
+			}
+
+			// Find the earliest S-type phase
+			for (const char* phaseName : sCandidates) {
+				const TravelTime *t = getPhase(ttlist, phaseName);
+				if (t) {
+					// If we haven't found an S yet, or if this one is earlier, keep it
+					if (!ts || t->time < ts->time) {
+						ts = t;
+					}
+				}
+			}
 			if (tp) {
 				_pArrival = _environment.hypocenter->time().value()
 							+ Core::TimeSpan(tp->time);
