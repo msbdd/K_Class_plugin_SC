@@ -243,7 +243,7 @@ class SimpleAmplitudeProcessor
 				amp_index = find_absmax (data.size (), data.typedData (), 0, data.size (), offset);
 				SEISCOMP_DEBUG ("Data size = %u",data.size ()); 
 				SEISCOMP_DEBUG ("P wave max detected at %u",amp_index);
-				maxAmplitude = fabs (data[amp_index]) - offset;
+				maxAmplitude = fabs (data[amp_index] - offset);
 			}
 			if (usedComponent () == FirstHorizontal || usedComponent () == SecondHorizontal)
 			{
@@ -288,7 +288,7 @@ class SimpleAmplitudeProcessor
 class AmplitudeProcessor_K_Class : public Processing::AmplitudeProcessor
 {
   public:
-  	TravelTimeTableInterface *_ttt;
+  	TravelTimeTableInterfacePtr _ttt;
 	AmplitudeProcessor_K_Class ()
 		: Processing::AmplitudeProcessor (MAG_TYPE)
 	{	
@@ -339,7 +339,7 @@ class AmplitudeProcessor_K_Class : public Processing::AmplitudeProcessor
 		catch (...) {
 		SEISCOMP_DEBUG("No ttt configured, using defaults");
 		}
-		//SeisComP 7.X fix
+
 		if (interface == ""){
 			interface = "LOCSAT";
 			SEISCOMP_DEBUG("No interface configured, using defaults");
@@ -587,7 +587,6 @@ class MagnitudeProcessor_K_Class : public Processing::MagnitudeProcessor
 {
 
   public:
-	double dist;
 	double A, a1, a2, a3, a4;
 	double b1, b2, b3, b4;
 	double l1, l2, l3;
