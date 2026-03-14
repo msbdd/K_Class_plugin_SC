@@ -216,10 +216,22 @@ class SimpleAmplitudeProcessor
 			return AmplitudeProcessor::computeTimeWindow();
 		}
 
+		if (!_trigger || !_haveP || !_haveS) {
+			SEISCOMP_DEBUG("computeTimeWindow: Missing trigger or P/S arrivals → using default");
+			return AmplitudeProcessor::computeTimeWindow();
+		}
+
+		double _pOffset = double(_pArrival - *_trigger);
+		double _sOffset = double(_sArrival - *_trigger);
+		_config.signalBegin = _pOffset;
+		_config.signalEnd = _sOffset;
+
 		// Vertical component (Z): Custom window around P wave - from P to S arrivals - should be the P wave maximum
 		SEISCOMP_DEBUG("computeTimeWindow: Vertical component → custom P-wave window");
-		SEISCOMP_DEBUG("P wave arrival %s", _pArrival.toString("%F %T.%f00000"));
-		SEISCOMP_DEBUG("S wave arrival %s", _sArrival.toString("%F %T.%f00000"));
+		SEISCOMP_DEBUG("P wave arrival %s (offset %.3fs from trigger)",
+		               _pArrival.toString("%F %T.%f00000"), _pOffset);
+		SEISCOMP_DEBUG("S wave arrival %s (offset %.3fs from trigger)",
+		               _sArrival.toString("%F %T.%f00000"), _sOffset);
 		AmplitudeProcessor::setTimeWindow(Core::TimeWindow(_pArrival, _sArrival));
 		}
 
